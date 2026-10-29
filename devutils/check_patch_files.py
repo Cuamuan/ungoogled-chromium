@@ -23,7 +23,8 @@ from pathlib import Path
 from third_party import unidiff
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'utils'))
-from _common import ENCODING, get_logger, parse_series
+from _common import ENCODING, get_logger, parse_series # pylint: disable=wrong-import-order
+
 sys.path.pop(0)
 
 # File suffixes to ignore for checking unused patches
@@ -51,7 +52,7 @@ def check_patch_readability(patches_dir, series_path=Path('series')):
     Check if the patches from iterable patch_path_iter are readable.
         Patches that are not are logged to stdout.
 
-    Returns True if warnings occured, False otherwise.
+    Returns True if warnings occurred, False otherwise.
     """
     warnings = False
     for patch_path in _read_series_file(patches_dir, series_path, join_dir=True):
@@ -75,7 +76,7 @@ def check_unused_patches(patches_dir, series_path=Path('series')):
         Unused patches are logged to stdout.
 
     patches_dir is a pathlib.Path to the directory of patches
-    series_path is a pathlib.Path to the series file relative to the patch_dir
+    series_path is a pathlib.Path to the series file relative to the patches_dir
 
     Returns True if there are unused patches; False otherwise.
     """
@@ -94,6 +95,23 @@ def check_unused_patches(patches_dir, series_path=Path('series')):
     return bool(unused_patches)
 
 
+def check_series_duplicates(patches_dir, series_path=Path('series')):
+    """
+    Checks if there are duplicate entries in the series file
+
+    series_path is a pathlib.Path to the series file relative to the patches_dir
+
+    returns True if there are duplicate entries; False otherwise.
+    """
+    entries_seen = set()
+    for entry in _read_series_file(patches_dir, series_path):
+        if entry in entries_seen:
+            get_logger().warning('Patch appears more than once in series: %s', entry)
+            return True
+        entries_seen.add(entry)
+    return False
+
+
 def main():
     """CLI entrypoint"""
 
@@ -101,21 +119,21 @@ def main():
     default_patches_dir = root_dir / 'patches'
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        '-p',
-        '--patches',
-        type=Path,
-        default=default_patches_dir,
-        help='Path to the patches directory to use. Default: %(default)s')
+    parser.add_argument('-p',
+                        '--patches',
+                        type=Path,
+                        default=default_patches_dir,
+                        help='Path to the patches directory to use. Default: %(default)s')
     args = parser.parse_args()
 
     warnings = False
     warnings |= check_patch_readability(args.patches)
+    warnings |= check_series_duplicates(args.patches)
     warnings |= check_unused_patches(args.patches)
 
     if warnings:
-        exit(1)
-    exit(0)
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == '__main__':

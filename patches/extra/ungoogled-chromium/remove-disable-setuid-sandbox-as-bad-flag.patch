@@ -2,11 +2,11 @@
 
 --- a/chrome/browser/ui/startup/bad_flags_prompt.cc
 +++ b/chrome/browser/ui/startup/bad_flags_prompt.cc
-@@ -60,7 +60,6 @@ static const char* kBadFlags[] = {
-     // These flags disable sandbox-related security.
-     service_manager::switches::kDisableGpuSandbox,
-     service_manager::switches::kDisableSeccompFilterSandbox,
--    service_manager::switches::kDisableSetuidSandbox,
-     service_manager::switches::kNoSandbox,
- #if defined(OS_WIN)
-     service_manager::switches::kAllowThirdPartyModules,
+@@ -94,7 +94,6 @@ const char* const kBadFlags[] = {
+     sandbox::policy::switches::kDisableGpuSandbox,
+     sandbox::policy::switches::kDisableLandlockSandbox,
+     sandbox::policy::switches::kDisableSeccompFilterSandbox,
+-    sandbox::policy::switches::kDisableSetuidSandbox,
+     sandbox::policy::switches::kDisableWebNNCompilerSandbox,
+     sandbox::policy::switches::kNoSandbox,
+ #if BUILDFLAG(IS_WIN)

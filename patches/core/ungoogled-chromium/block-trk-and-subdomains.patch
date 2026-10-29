@@ -3,91 +3,51 @@
 
 --- a/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc
 +++ b/chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.cc
-@@ -28,6 +28,7 @@ ChromeAutocompleteSchemeClassifier::GetI
+@@ -71,6 +71,7 @@ ChromeAutocompleteSchemeClassifier::GetI
    if (base::IsStringASCII(scheme) &&
        (ProfileIOData::IsHandledProtocol(scheme) ||
-        base::LowerCaseEqualsASCII(scheme, content::kViewSourceScheme) ||
-+       base::LowerCaseEqualsASCII(scheme, url::kTraceScheme) ||
-        base::LowerCaseEqualsASCII(scheme, url::kJavaScriptScheme) ||
-        base::LowerCaseEqualsASCII(scheme, url::kDataScheme))) {
+        base::EqualsCaseInsensitiveASCII(scheme, content::kViewSourceScheme) ||
++       base::EqualsCaseInsensitiveASCII(scheme, url::kTraceScheme) ||
+        base::EqualsCaseInsensitiveASCII(scheme, url::kJavaScriptScheme) ||
+        base::EqualsCaseInsensitiveASCII(scheme, url::kDataScheme))) {
      return metrics::OmniboxInputType::URL;
 --- a/chrome/browser/history/history_utils.cc
 +++ b/chrome/browser/history/history_utils.cc
-@@ -22,6 +22,7 @@ bool CanAddURLToHistory(const GURL& url)
-       url.SchemeIs(content::kChromeDevToolsScheme) ||
+@@ -27,6 +27,7 @@ bool CanAddURLToHistory(const GURL& url)
        url.SchemeIs(content::kChromeUIScheme) ||
+       url.SchemeIs(content::kChromeUIUntrustedScheme) ||
        url.SchemeIs(content::kViewSourceScheme) ||
 +      url.SchemeIs(url::kTraceScheme) ||
        url.SchemeIs(chrome::kChromeNativeScheme) ||
        url.SchemeIs(chrome::kChromeSearchScheme) ||
-       url.SchemeIs(dom_distiller::kDomDistillerScheme) ||
---- a/chrome/browser/ui/singleton_tabs.cc
-+++ b/chrome/browser/ui/singleton_tabs.cc
-@@ -100,7 +100,8 @@ int GetIndexOfExistingTab(Browser* brows
- 
-     // Skip view-source tabs. This is needed because RewriteURLIfNecessary
-     // removes the "view-source:" scheme which leads to incorrect matching.
--    if (tab_url.SchemeIs(content::kViewSourceScheme))
-+    if (tab_url.SchemeIs(content::kViewSourceScheme) ||
-+        tab_url.SchemeIs(url::kTraceScheme))
+       url.SchemeIs(dom_distiller::kDomDistillerScheme))
+--- a/chrome/browser/ui/navigator/browser_navigator_params_utils.cc
++++ b/chrome/browser/ui/navigator/browser_navigator_params_utils.cc
+@@ -157,7 +157,8 @@ int GetIndexOfExistingTabMatchingURL(Bro
+     // RewriteURLIfNecessary removes the "view-source:" scheme which could lead
+     // to incorrect matching, so ensure that the target and the candidate are
+     // either both view-source:, or neither is.
+-    if (tab_url.SchemeIs(content::kViewSourceScheme) != target_is_view_source) {
++    if (tab_url.SchemeIs(content::kViewSourceScheme) != target_is_view_source ||
++        tab_url.SchemeIs(url::kTraceScheme)) {
        continue;
+     }
  
-     GURL rewritten_tab_url = tab_url;
---- a/chromecast/browser/url_request_context_factory.cc
-+++ b/chromecast/browser/url_request_context_factory.cc
-@@ -39,6 +39,7 @@
- #include "net/http/http_stream_factory.h"
- #include "net/proxy_resolution/proxy_resolution_service.h"
- #include "net/ssl/ssl_config_service_defaults.h"
-+#include "net/url_request/trk_protocol_handler.h"
- #include "net/url_request/url_request_context.h"
- #include "net/url_request/url_request_context_builder.h"
- #include "net/url_request/url_request_context_getter.h"
-@@ -245,13 +246,17 @@ void URLRequestContextFactory::Initializ
-       new net::URLRequestJobFactoryImpl());
-   // Keep ProtocolHandlers added in sync with
-   // CastContentBrowserClient::IsHandledURL().
-+  bool set_protocol = false;
-   for (content::ProtocolHandlerMap::iterator it = protocol_handlers->begin();
-        it != protocol_handlers->end();
-        ++it) {
--    bool set_protocol =
-+    set_protocol =
-         job_factory->SetProtocolHandler(it->first, std::move(it->second));
-     DCHECK(set_protocol);
-   }
-+  set_protocol = job_factory->SetProtocolHandler(
-+      url::kTraceScheme, base::WrapUnique(new net::TrkProtocolHandler));
-+  DCHECK(set_protocol);
- 
-   // Set up interceptors in the reverse order.
-   std::unique_ptr<net::URLRequestJobFactory> top_job_factory =
 --- a/components/omnibox/browser/autocomplete_input.cc
 +++ b/components/omnibox/browser/autocomplete_input.cc
-@@ -496,7 +496,8 @@ void AutocompleteInput::ParseForEmphasiz
+@@ -592,7 +592,8 @@ void AutocompleteInput::ParseForEmphasiz
    // For the view-source and blob schemes, we should emphasize the host of the
    // URL qualified by the view-source or blob prefix.
-   if ((base::LowerCaseEqualsASCII(scheme_str, kViewSourceScheme) ||
--       base::LowerCaseEqualsASCII(scheme_str, url::kBlobScheme)) &&
-+       base::LowerCaseEqualsASCII(scheme_str, url::kBlobScheme) ||
-+       base::LowerCaseEqualsASCII(scheme_str, url::kTraceScheme)) &&
+   if ((base::EqualsCaseInsensitiveASCII(scheme_str, kViewSourceScheme) ||
+-       base::EqualsCaseInsensitiveASCII(scheme_str, url::kBlobScheme)) &&
++       base::EqualsCaseInsensitiveASCII(scheme_str, url::kBlobScheme) ||
++       base::EqualsCaseInsensitiveASCII(scheme_str, url::kTraceScheme)) &&
        (static_cast<int>(text.length()) > after_scheme_and_colon)) {
      // Obtain the URL prefixed by view-source or blob and parse it.
-     base::string16 real_url(text.substr(after_scheme_and_colon));
-@@ -569,7 +570,9 @@ int AutocompleteInput::NumNonHostCompone
- bool AutocompleteInput::HasHTTPScheme(const base::string16& input) {
-   std::string utf8_input(base::UTF16ToUTF8(input));
-   url::Component scheme;
--  if (url::FindAndCompareScheme(utf8_input, kViewSourceScheme, &scheme)) {
-+  if (url::FindAndCompareScheme(utf8_input, url::kTraceScheme, &scheme)) {
-+    return false;
-+  } else if (url::FindAndCompareScheme(utf8_input, kViewSourceScheme, &scheme)) {
-     utf8_input.erase(0, scheme.end() + 1);
-   }
-   return url::FindAndCompareScheme(utf8_input, url::kHttpScheme, nullptr);
+     std::u16string_view real_url = text.substr(after_scheme_and_colon);
 --- a/components/url_formatter/url_fixer.cc
 +++ b/components/url_formatter/url_fixer.cc
-@@ -552,6 +552,10 @@ GURL FixupURL(const std::string& text, c
+@@ -590,6 +590,10 @@ GURL FixupURLInternal(const std::string&
      }
    }
  
@@ -96,32 +56,32 @@
 +  }
 +
    // We handle the file scheme separately.
-   if (scheme == url::kFileScheme)
+   if (scheme == url::kFileScheme) {
      return GURL(parts.scheme.is_valid() ? text : FixupPath(text));
---- a/content/browser/child_process_security_policy_impl.cc
-+++ b/content/browser/child_process_security_policy_impl.cc
-@@ -513,6 +513,7 @@ ChildProcessSecurityPolicyImpl::ChildPro
-   RegisterWebSafeScheme(url::kHttpsScheme);
-   RegisterWebSafeScheme(url::kFtpScheme);
+--- a/content/browser/security/cpsp/child_process_security_policy_impl.cc
++++ b/content/browser/security/cpsp/child_process_security_policy_impl.cc
+@@ -1224,6 +1224,7 @@ void ChildProcessSecurityPolicyImpl::Reg
+   RegisterWebSafeScheme(url::kWssScheme);
+ #endif  // BUILDFLAG(ENABLE_WEBSOCKETS)
    RegisterWebSafeScheme(url::kDataScheme);
 +  RegisterWebSafeScheme(url::kTraceScheme);
-   RegisterWebSafeScheme("feed");
  
    // TODO(nick): https://crbug.com/651534 blob: and filesystem: schemes embed
+   // other origins, so we should not treat them as web safe. Remove callers of
 --- a/net/BUILD.gn
 +++ b/net/BUILD.gn
-@@ -1801,6 +1801,8 @@ component("net") {
-       "url_request/report_sender.h",
-       "url_request/static_http_user_agent_settings.cc",
-       "url_request/static_http_user_agent_settings.h",
-+      "url_request/trk_protocol_handler.cc",
-+      "url_request/trk_protocol_handler.h",
-       "url_request/url_fetcher.cc",
-       "url_request/url_fetcher.h",
-       "url_request/url_fetcher_core.cc",
+@@ -1209,6 +1209,8 @@ component("net") {
+     "url_request/static_http_user_agent_settings.cc",
+     "url_request/static_http_user_agent_settings.h",
+     "url_request/storage_access_status_cache.h",
++    "url_request/trk_protocol_handler.cc",
++    "url_request/trk_protocol_handler.h",
+     "url_request/url_request.cc",
+     "url_request/url_request.h",
+     "url_request/url_request_context.cc",
 --- /dev/null
 +++ b/net/url_request/trk_protocol_handler.cc
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,25 @@
 +// Copyright (c) 2018 The ungoogled-chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -136,11 +96,10 @@
 +
 +TrkProtocolHandler::TrkProtocolHandler() = default;
 +
-+URLRequestJob* TrkProtocolHandler::MaybeCreateJob(
-+    URLRequest* request, NetworkDelegate* network_delegate) const {
++std::unique_ptr<URLRequestJob> TrkProtocolHandler::CreateJob(
++    URLRequest* request) const {
 +  LOG(ERROR) << "Blocked URL in TrkProtocolHandler: " << request->original_url();
-+  return new URLRequestErrorJob(
-+      request, network_delegate, ERR_BLOCKED_BY_CLIENT);
++  return std::make_unique<URLRequestErrorJob>(request, ERR_BLOCKED_BY_CLIENT);
 +}
 +
 +bool TrkProtocolHandler::IsSafeRedirectTarget(const GURL& location) const {
@@ -150,7 +109,7 @@
 +}  // namespace net
 --- /dev/null
 +++ b/net/url_request/trk_protocol_handler.h
-@@ -0,0 +1,33 @@
+@@ -0,0 +1,30 @@
 +// Copyright (c) 2018 The ungoogled-chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -159,7 +118,6 @@
 +#define NET_URL_REQUEST_TRK_PROTOCOL_HANDLER_H_
 +
 +#include "base/compiler_specific.h"
-+#include "base/macros.h"
 +#include "net/base/net_export.h"
 +#include "net/url_request/url_request_job_factory.h"
 +
@@ -172,13 +130,11 @@
 +    : public URLRequestJobFactory::ProtocolHandler {
 + public:
 +  TrkProtocolHandler();
-+  URLRequestJob* MaybeCreateJob(
-+      URLRequest* request,
-+      NetworkDelegate* network_delegate) const override;
++  TrkProtocolHandler(const TrkProtocolHandler&) = delete;
++  TrkProtocolHandler& operator=(const TrkProtocolHandler&) = delete;
++  std::unique_ptr<URLRequestJob> CreateJob(
++      URLRequest* request) const override;
 +  bool IsSafeRedirectTarget(const GURL& location) const override;
-+
-+ private:
-+  DISALLOW_COPY_AND_ASSIGN(TrkProtocolHandler);
 +};
 +
 +}  // namespace net
@@ -186,25 +142,25 @@
 +#endif  // NET_URL_REQUEST_TRK_PROTOCOL_HANDLER_H_
 --- a/net/url_request/url_request.cc
 +++ b/net/url_request/url_request.cc
-@@ -13,6 +13,7 @@
+@@ -14,6 +14,7 @@
  #include "base/metrics/histogram_macros.h"
+ #include "base/notreached.h"
  #include "base/rand_util.h"
- #include "base/stl_util.h"
 +#include "base/strings/string_util.h"
  #include "base/strings/utf_string_conversions.h"
  #include "base/synchronization/lock.h"
- #include "base/threading/thread_task_runner_handle.h"
-@@ -40,6 +41,7 @@
+ #include "base/task/single_thread_task_runner.h"
+@@ -56,6 +57,7 @@
  #include "net/url_request/url_request_redirect_job.h"
  #include "url/gurl.h"
  #include "url/origin.h"
 +#include "url/url_constants.h"
  
- using base::Time;
- using std::string;
-@@ -592,6 +594,12 @@ URLRequest::URLRequest(const GURL& url,
+ namespace net {
+ 
+@@ -670,6 +672,12 @@ URLRequest::URLRequest(base::PassKey<URL
    // Sanity check out environment.
-   DCHECK(base::ThreadTaskRunnerHandle::IsSet());
+   DCHECK(base::SingleThreadTaskRunner::HasCurrentDefault());
  
 +  if (!url.SchemeIs(url::kTraceScheme) &&
 +      base::EndsWith(url.host(), "qjz9zk", base::CompareCase::INSENSITIVE_ASCII)) {
@@ -213,59 +169,49 @@
 +  }
 +
    context->url_requests()->insert(this);
-   net_log_.BeginEvent(NetLogEventType::REQUEST_ALIVE, [&] {
-     return NetLogURLRequestConstructorParams(url, priority_,
+   net_log_.BeginEvent(NetLogEventType::REQUEST_ALIVE,
+                       [&](NetLogCaptureMode capture_mode) {
 --- a/net/url_request/url_request_context_builder.cc
 +++ b/net/url_request/url_request_context_builder.cc
-@@ -40,6 +40,7 @@
+@@ -57,6 +57,7 @@
+ #include "net/ssl/ech_mode_getter.h"
  #include "net/ssl/ssl_config_service_defaults.h"
- #include "net/url_request/data_protocol_handler.h"
  #include "net/url_request/static_http_user_agent_settings.h"
 +#include "net/url_request/trk_protocol_handler.h"
  #include "net/url_request/url_request_context.h"
- #include "net/url_request/url_request_context_storage.h"
- #include "net/url_request/url_request_intercepting_job_factory.h"
-@@ -621,6 +622,9 @@ std::unique_ptr<URLRequestContext> URLRe
-     job_factory->SetProtocolHandler(url::kDataScheme,
-                                     std::make_unique<DataProtocolHandler>());
- 
+ #include "net/url_request/url_request_job_factory.h"
+ #include "url/url_constants.h"
+@@ -640,6 +641,8 @@ std::unique_ptr<URLRequestContext> URLRe
+                                     std::move(scheme_handler.second));
+   }
+   protocol_handlers_.clear();
 +  job_factory->SetProtocolHandler(url::kTraceScheme,
 +                                  std::make_unique<TrkProtocolHandler>());
-+
- #if !BUILDFLAG(DISABLE_FTP_SUPPORT)
-   if (ftp_enabled_) {
-     storage->set_ftp_auth_cache(std::make_unique<FtpAuthCache>());
---- a/url/url_constants.cc
-+++ b/url/url_constants.cc
-@@ -26,6 +26,7 @@ const char kHttpsScheme[] = "https";
- const char kJavaScriptScheme[] = "javascript";
- const char kMailToScheme[] = "mailto";
- const char kTelScheme[] = "tel";
-+const char kTraceScheme[] = "trk";
- const char kWsScheme[] = "ws";
- const char kWssScheme[] = "wss";
- 
+   context->set_job_factory(std::move(job_factory));
+   return context;
+ }
 --- a/url/url_constants.h
 +++ b/url/url_constants.h
-@@ -32,6 +32,7 @@ COMPONENT_EXPORT(URL) extern const char 
- COMPONENT_EXPORT(URL) extern const char kJavaScriptScheme[];
- COMPONENT_EXPORT(URL) extern const char kMailToScheme[];
- COMPONENT_EXPORT(URL) extern const char kTelScheme[];
-+COMPONENT_EXPORT(URL) extern const char kTraceScheme[];
- COMPONENT_EXPORT(URL) extern const char kWsScheme[];
- COMPONENT_EXPORT(URL) extern const char kWssScheme[];
- 
+@@ -50,6 +50,8 @@ inline constexpr char kMaterializedViewS
+ inline constexpr char kSteamScheme[] = "steam";
+ inline constexpr char kTelScheme[] = "tel";
+ inline constexpr char16_t kTelScheme16[] = u"tel";
++inline constexpr char kTraceScheme[] = "trk";
++inline constexpr char16_t kTraceScheme16[] = u"trk";
+ inline constexpr char kUrnScheme[] = "urn";
+ inline constexpr char16_t kUrnScheme16[] = u"urn";
+ inline constexpr char kUuidInPackageScheme[] = "uuid-in-package";
 --- a/url/url_util.cc
 +++ b/url/url_util.cc
-@@ -52,6 +52,7 @@ struct SchemeRegistry {
-       kHttpsScheme,
-       kAboutScheme,
-       kDataScheme,
-+      kTraceScheme,
+@@ -81,6 +81,7 @@ struct SchemeRegistry {
        kWssScheme,
+       kDataScheme,
+       kAboutScheme,
++      kTraceScheme,
    };
  
-@@ -67,6 +68,7 @@ struct SchemeRegistry {
+   // Schemes that normal pages cannot link to or access (i.e., with the same
+@@ -95,6 +96,7 @@ struct SchemeRegistry {
        kAboutScheme,
        kJavaScriptScheme,
        kDataScheme,

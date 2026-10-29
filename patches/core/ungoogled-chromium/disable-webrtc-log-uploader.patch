@@ -2,7 +2,7 @@
 
 --- a/chrome/browser/media/webrtc/webrtc_log_uploader.cc
 +++ b/chrome/browser/media/webrtc/webrtc_log_uploader.cc
-@@ -125,29 +125,11 @@ void WebRtcLogUploader::LoggingStoppedDo
+@@ -181,31 +181,13 @@ void WebRtcLogUploader::OnLoggingStopped
    DCHECK(meta_data.get());
    DCHECK(!upload_done_data.paths.directory.empty());
  
@@ -11,9 +11,10 @@
 -  std::string local_log_id;
 -
    if (base::PathExists(upload_done_data.paths.directory)) {
-     webrtc_logging::DeleteOldWebRtcLogFiles(upload_done_data.paths.directory);
+     webrtc_logging::DeleteOldWebRtcLogFiles({upload_done_data.paths.directory});
 -
--    local_log_id = base::NumberToString(base::Time::Now().ToDoubleT());
+-    local_log_id =
+-        base::NumberToString(base::Time::Now().InSecondsFSinceUnixEpoch());
 -    base::FilePath log_file_path =
 -        upload_done_data.paths.directory.AppendASCII(local_log_id)
 -            .AddExtension(FILE_PATH_LITERAL(".gz"));
@@ -25,20 +26,21 @@
 -    AddLocallyStoredLogInfoToUploadListFile(log_list_path, local_log_id);
    }
  
--  UploadDoneData upload_done_data_with_log_id = upload_done_data;
--  upload_done_data_with_log_id.local_log_id = local_log_id;
--  PrepareMultipartPostData(compressed_log, std::move(meta_data),
--                           upload_done_data_with_log_id);
-+  NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", upload_done_data);
- }
+-  upload_done_data.local_log_id = local_log_id;
  
- void WebRtcLogUploader::PrepareMultipartPostData(
-@@ -158,26 +140,7 @@ void WebRtcLogUploader::PrepareMultipart
+   if (is_text_log_upload_allowed) {
+-    PrepareMultipartPostData(site, compressed_log, std::move(meta_data),
+-                             std::move(upload_done_data));
++    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", std::move(upload_done_data));
+   } else {
+     main_task_runner_->PostTask(
+         FROM_HERE,
+@@ -223,28 +205,7 @@ void WebRtcLogUploader::PrepareMultipart
    DCHECK(!compressed_log.empty());
    DCHECK(meta_data.get());
  
 -  std::unique_ptr<std::string> post_data(new std::string());
--  SetupMultipart(post_data.get(), compressed_log,
+-  SetupMultipart(post_data.get(), site, compressed_log,
 -                 upload_done_data.paths.incoming_rtp_dump,
 -                 upload_done_data.paths.outgoing_rtp_dump, *meta_data.get());
 -
@@ -46,26 +48,28 @@
 -  // Still fire the upload callback so that we can run an extension API test
 -  // using the test framework for that without hanging.
 -  // TODO(grunell): Remove this when the api test for this feature is fully
--  // implemented according to the test plan. http://crbug.com/257329.
+-  // implemented according to the test plan. http://crbug.com/41023787.
 -  if (post_data_) {
 -    *post_data_ = *post_data;
--    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", upload_done_data);
+-    NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "",
+-                                std::move(upload_done_data));
 -    return;
 -  }
 -
 -  main_task_runner_->PostTask(
--      FROM_HERE, base::BindOnce(&WebRtcLogUploader::UploadCompressedLog,
--                                base::Unretained(this), upload_done_data,
--                                std::move(post_data)));
-+  NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", upload_done_data);
+-      FROM_HERE,
+-      base::BindOnce(&WebRtcLogUploader::UploadCompressedLog,
+-                     base::Unretained(this), std::move(upload_done_data),
+-                     std::move(post_data)));
++  NotifyUploadDoneAndLogStats(net::HTTP_OK, net::OK, "", std::move(upload_done_data));
  }
  
- void WebRtcLogUploader::UploadStoredLog(
-@@ -245,49 +208,6 @@ void WebRtcLogUploader::LoggingStoppedDo
+ void WebRtcLogUploader::LoggingStoppedDoStore(
+@@ -258,48 +219,6 @@ void WebRtcLogUploader::LoggingStoppedDo
    DCHECK(log_buffer.get());
    DCHECK(!log_paths.directory.empty());
  
--  webrtc_logging::DeleteOldWebRtcLogFiles(log_paths.directory);
+-  webrtc_logging::DeleteOldWebRtcLogFiles({log_paths.directory});
 -
 -  base::FilePath log_list_path =
 -      webrtc_logging::TextLogList::GetWebRtcLogListFileForDirectory(
@@ -104,10 +108,20 @@
 -    base::FilePath meta_path =
 -        log_paths.directory.AppendASCII(log_id).AddExtension(
 -            FILE_PATH_LITERAL(".meta"));
--    base::WriteFile(meta_path, static_cast<const char*>(pickle.data()),
--                    pickle.size());
+-    base::WriteFile(meta_path, pickle);
 -  }
 -
-   main_task_runner_->PostTask(FROM_HERE,
-                               base::BindOnce(done_callback, true, ""));
+   main_task_runner_->PostTask(
+       FROM_HERE, base::BindOnce(std::move(done_callback), true, ""));
  
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -164,7 +164,7 @@ void RegisterBrowserUserPrefs(user_prefs
+   registry->RegisterStringPref(prefs::kWebRTCUDPPortRange, std::string());
+   registry->RegisterBooleanPref(prefs::kWebRtcEventLogCollectionAllowed, false);
+   registry->RegisterListPref(prefs::kWebRtcLocalIpsAllowedUrls);
+-  registry->RegisterBooleanPref(prefs::kWebRtcTextLogCollectionAllowed, true);
++  registry->RegisterBooleanPref(prefs::kWebRtcTextLogCollectionAllowed, false);
+   registry->RegisterListPref(
+       prefs::kWebRTCDiagnosticLogCollectionAllowedForOrigins,
+       base::ListValue());
